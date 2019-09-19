@@ -9,14 +9,15 @@ import (
 )
 
 // NewPool create a new pool
-func NewPool(config *Config, factory Factory) (*ConnPool, error) {
+// ctx , cancel
+func NewPool(ctx context.Context, cancel func(), config *Config, factory Factory) (*ConnPool, error) {
 	if config.MaxCap <= 0 {
 		return nil, errors.New("invalid max capacity config")
 	}
 	if config.MaxCap < config.InitSize {
 		config.InitSize = config.MaxCap
 	}
-	ctx, cancel := context.WithCancel(context.Background())
+	//ctx, cancel := context.WithCancel(context.Background())
 	p := &ConnPool{
 		config:  config,
 		factory: factory,
@@ -75,10 +76,11 @@ func (p *ConnPool) newItem(ctx context.Context) (*item, error) {
 }
 
 // Get  get a conn
-func (p *ConnPool) Get(ctx context.Context, blockGet bool) (*Conn, error) {
-	return p.getBlock(ctx)
+func (p *ConnPool) Get(ctx context.Context, poolCtx context.Context, blockGet bool) (*Conn, error) {
+	return p.getBlock(ctx, poolCtx)
 }
 
+/*
 /*
 getBlock
 getBlock blocking gets an available object connection
@@ -86,7 +88,7 @@ Timeout is controlled by WaitTimeout
 Priority is obtained from the idle channel IdleItems
 IdleItems has no object Create new item
 */
-func (p *ConnPool) getBlock(ctx context.Context) (*Conn, error) {
+func (p *ConnPool) getBlock(ctx context.Context, poolCtx context.Context) (*Conn, error) {
 	logEntry := logrus.WithFields(logrus.Fields{
 		"func_name": "GetBlock",
 	})
@@ -120,7 +122,7 @@ func (p *ConnPool) getBlock(ctx context.Context) (*Conn, error) {
 		default:
 			if p.active < p.config.MaxCap {
 				logEntry.Infoln("Get NewItem in")
-				item, err := p.newItem(p.ctx)
+				item, err := p.newItem(poolCtx)
 				if err != nil {
 					return nil, err
 				}
@@ -172,6 +174,7 @@ func (p *ConnPool) Destroy(ctx context.Context, conn *Conn) error {
 func (p *ConnPool) Close() {
 	p.mu.Lock()
 	if p.IdleItems != nil {
+		p.mu.Unlock()
 		close(p.IdleItems)
 	}
 	p.cancel()

@@ -43,13 +43,14 @@ func GetConfig() *Config {
 }
 
 func Test_Pool(t *testing.T) {
+	poolCtx, poolCancel := context.WithCancel(context.Background())
 	config := GetConfig()
-	p, err := NewPool(config, &ConnTest{})
+	p, err := NewPool(poolCtx, poolCancel, config, &ConnTest{})
 	assert.Nil(t, err)
 	assert.Equal(t, int64(len(p.IdleItems)), config.InitSize)
 	ctx, cancel := context.WithCancel(context.Background())
 
-	i, err := p.Get(ctx, true)
+	i, err := p.Get(ctx, poolCtx, true)
 	assert.Nil(t, err)
 	assert.Equal(t, i.id, int64(1))
 
@@ -66,7 +67,7 @@ func Test_Pool(t *testing.T) {
 		cancel()
 	}()
 
-	i, err = p.Get(ctx, true)
+	i, err = p.Get(ctx, poolCtx, true)
 
 	//assert.Nil(t, err)
 	//assert.Equal(t, i.id, int64(99))
@@ -78,19 +79,21 @@ func Test_Pool(t *testing.T) {
 
 func Test_PoolPut(t *testing.T) {
 	config := GetConfig()
-	p, err := NewPool(config, &ConnTest{})
+	poolCtx, poolCancel := context.WithCancel(context.Background())
+
+	p, err := NewPool(poolCtx, poolCancel, config, &ConnTest{})
 	assert.Nil(t, err)
 	assert.Equal(t, int64(len(p.IdleItems)), config.InitSize)
 	ctx, cancel := context.WithCancel(context.Background())
 
-	i, err := p.Get(ctx, true)
+	i, err := p.Get(ctx, poolCtx, true)
 	assert.Nil(t, err)
 	assert.Equal(t, i.id, int64(1))
 
 	err = p.Put(ctx, i)
 	assert.Nil(t, err)
 
-	i2, err := p.Get(ctx, true)
+	i2, err := p.Get(ctx, poolCtx, true)
 	assert.Nil(t, err)
 	assert.Equal(t, i.id, i2.id)
 
@@ -115,7 +118,9 @@ func GetConfig2() *Config {
 
 func Benchmark_PoolParallel(b *testing.B) {
 	config := GetConfig2()
-	p, err := NewPool(config, &ConnTest{})
+	poolCtx, poolCancel := context.WithCancel(context.Background())
+
+	p, err := NewPool(poolCtx, poolCancel, config, &ConnTest{})
 	assert.Nil(b, err)
 	assert.Equal(b, int64(len(p.IdleItems)), config.InitSize)
 	ctx, _ := context.WithCancel(context.Background())
@@ -123,7 +128,7 @@ func Benchmark_PoolParallel(b *testing.B) {
 	b.ResetTimer()
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
-			conn, err := p.Get(ctx, true)
+			conn, err := p.Get(ctx, poolCtx, true)
 			if err != nil {
 				b.Error(err)
 				continue
