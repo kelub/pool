@@ -30,11 +30,46 @@ func NewPool(ctx context.Context, config *Config, factory Factory) (*ConnPool, e
 	return p, nil
 }
 
+func (p *ConnPool) createItem(ctx context.Context) {
+	logEntry := logrus.WithFields(logrus.Fields{
+		"func_name": "createItem",
+	})
+	now := time.Now()
+	conn, err := p.factory.New(ctx)
+	if err != nil {
+		logEntry.Errorln(err)
+		return
+	}
+	item := &item{
+		createdAt: now,
+		conn:      conn,
+	}
+	logEntry.Infoln("item", item)
+	atomic.AddInt64(&p.active, 1)
+	p.newItemCh <- item
+	return
+}
+
+func (p *ConnPool) newItemLoop(ctx context.Context) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+			if p.active < p.config.MaxCap {
+				p.createItem(ctx)
+			}
+		}
+
+	}
+}
+
 // initPool init a Pool
 // create InitSize number of  item to IdleItems.
 func (p *ConnPool) initPool(ctx context.Context) error {
 	now := time.Now()
 	p.IdleItems = make(chan *item, p.config.MaxIdleCap)
+	p.newItemCh = make(chan *item)
 	for i := int64(0); i < p.config.InitSize; i++ {
 		conn, err := p.factory.New(ctx)
 		if err != nil {
@@ -48,6 +83,8 @@ func (p *ConnPool) initPool(ctx context.Context) error {
 		p.IdleItems <- item
 		p.active++
 	}
+
+	go p.newItemLoop(ctx)
 	return nil
 }
 
@@ -98,7 +135,7 @@ func (p *ConnPool) getBlock(ctx context.Context, poolCtx context.Context) (*Conn
 		case item, ok := <-p.IdleItems:
 			if !ok {
 				logEntry.Infoln("IdleItems Closed")
-				break
+				return nil, errors.New("Pool Closed")
 			}
 			if item == nil {
 				logEntry.Infoln("IdleItems item nil")
@@ -122,9 +159,12 @@ func (p *ConnPool) getBlock(ctx context.Context, poolCtx context.Context) (*Conn
 		default:
 			if p.active < p.config.MaxCap {
 				logEntry.Infoln("Get NewItem in")
-				item, err := p.newItem(poolCtx)
-				if err != nil {
-					return nil, err
+				item, ok := <-p.newItemCh
+				if !ok {
+					return nil, errors.New("Pool Closed")
+				}
+				if item == nil {
+					return nil, errors.New("create Item error")
 				}
 				return item.conn, nil
 			}
@@ -176,6 +216,11 @@ func (p *ConnPool) Close() {
 	if p.IdleItems != nil {
 		p.mu.Unlock()
 		close(p.IdleItems)
+	}
+	p.mu.Lock()
+	if p.newItemCh != nil {
+		p.mu.Unlock()
+		close(p.newItemCh)
 	}
 	p.cancel()
 }

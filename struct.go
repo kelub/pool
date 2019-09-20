@@ -60,10 +60,13 @@ type ConnPool struct {
 	config  *Config
 	factory Factory
 	mu      sync.RWMutex
-	cancel  func()
+
+	// context cancel
+	cancel func()
 	// Number of objects created
 	active    int64
 	IdleItems chan *item
+	newItemCh chan *item
 }
 
 type item struct {
