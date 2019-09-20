@@ -10,14 +10,14 @@ import (
 
 // NewPool create a new pool
 // ctx , cancel
-func NewPool(ctx context.Context, cancel func(), config *Config, factory Factory) (*ConnPool, error) {
+func NewPool(ctx context.Context, config *Config, factory Factory) (*ConnPool, error) {
 	if config.MaxCap <= 0 {
 		return nil, errors.New("invalid max capacity config")
 	}
 	if config.MaxCap < config.InitSize {
 		config.InitSize = config.MaxCap
 	}
-	//ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(ctx)
 	p := &ConnPool{
 		config:  config,
 		factory: factory,

@@ -43,9 +43,9 @@ func GetConfig() *Config {
 }
 
 func Test_Pool(t *testing.T) {
-	poolCtx, poolCancel := context.WithCancel(context.Background())
+	poolCtx := context.Background()
 	config := GetConfig()
-	p, err := NewPool(poolCtx, poolCancel, config, &ConnTest{})
+	p, err := NewPool(poolCtx, poolCancel, &ConnTest{})
 	assert.Nil(t, err)
 	assert.Equal(t, int64(len(p.IdleItems)), config.InitSize)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -79,9 +79,9 @@ func Test_Pool(t *testing.T) {
 
 func Test_PoolPut(t *testing.T) {
 	config := GetConfig()
-	poolCtx, poolCancel := context.WithCancel(context.Background())
+	poolCtx := context.Background()
 
-	p, err := NewPool(poolCtx, poolCancel, config, &ConnTest{})
+	p, err := NewPool(poolCtx, config, &ConnTest{})
 	assert.Nil(t, err)
 	assert.Equal(t, int64(len(p.IdleItems)), config.InitSize)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -118,9 +118,9 @@ func GetConfig2() *Config {
 
 func Benchmark_PoolParallel(b *testing.B) {
 	config := GetConfig2()
-	poolCtx, poolCancel := context.WithCancel(context.Background())
+	poolCtx := context.Background()
 
-	p, err := NewPool(poolCtx, poolCancel, config, &ConnTest{})
+	p, err := NewPool(poolCtx, config, &ConnTest{})
 	assert.Nil(b, err)
 	assert.Equal(b, int64(len(p.IdleItems)), config.InitSize)
 	ctx, _ := context.WithCancel(context.Background())
