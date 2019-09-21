@@ -8,6 +8,10 @@ import (
 	"time"
 )
 
+func init() {
+	logrus.SetLevel(logrus.DebugLevel)
+}
+
 // NewPool create a new pool
 // ctx , cancel
 func NewPool(ctx context.Context, config *Config, factory Factory) (*ConnPool, error) {
@@ -38,13 +42,13 @@ func (p *ConnPool) createItem(ctx context.Context) {
 	conn, err := p.factory.New(ctx)
 	if err != nil {
 		logEntry.Errorln(err)
+		p.newItemCh <- nil
 		return
 	}
 	item := &item{
 		createdAt: now,
 		conn:      conn,
 	}
-	logEntry.Infoln("item", item)
 	atomic.AddInt64(&p.active, 1)
 	p.newItemCh <- item
 	return
@@ -60,7 +64,6 @@ func (p *ConnPool) newItemLoop(ctx context.Context) {
 				p.createItem(ctx)
 			}
 		}
-
 	}
 }
 
@@ -89,32 +92,32 @@ func (p *ConnPool) initPool(ctx context.Context) error {
 }
 
 // newItem  create new item
-func (p *ConnPool) newItem(ctx context.Context) (*item, error) {
-	logEntry := logrus.WithFields(logrus.Fields{
-		"func_name": "NewItem",
-	})
-	select {
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	default:
-		now := time.Now()
-		conn, err := p.factory.New(ctx)
-		if err != nil {
-			return nil, err
-		}
-		item := &item{
-			createdAt: now,
-			conn:      conn,
-		}
-		logEntry.Infoln("item", item)
-		atomic.AddInt64(&p.active, 1)
-		return item, nil
-	}
-}
+//func (p *ConnPool) newItem(ctx context.Context) (*item, error) {
+//	logEntry := logrus.WithFields(logrus.Fields{
+//		"func_name": "NewItem",
+//	})
+//	select {
+//	case <-ctx.Done():
+//		return nil, ctx.Err()
+//	default:
+//		now := time.Now()
+//		conn, err := p.factory.New(ctx)
+//		if err != nil {
+//			return nil, err
+//		}
+//		item := &item{
+//			createdAt: now,
+//			conn:      conn,
+//		}
+//		logEntry.Infoln("item", item)
+//		atomic.AddInt64(&p.active, 1)
+//		return item, nil
+//	}
+//}
 
 // Get  get a conn
-func (p *ConnPool) Get(ctx context.Context, poolCtx context.Context, blockGet bool) (*Conn, error) {
-	return p.getBlock(ctx, poolCtx)
+func (p *ConnPool) Get(ctx context.Context, blockGet bool) (*Conn, error) {
+	return p.getBlock(ctx)
 }
 
 /*
@@ -125,7 +128,7 @@ Timeout is controlled by WaitTimeout
 Priority is obtained from the idle channel IdleItems
 IdleItems has no object Create new item
 */
-func (p *ConnPool) getBlock(ctx context.Context, poolCtx context.Context) (*Conn, error) {
+func (p *ConnPool) getBlock(ctx context.Context) (*Conn, error) {
 	logEntry := logrus.WithFields(logrus.Fields{
 		"func_name": "GetBlock",
 	})
@@ -156,17 +159,28 @@ func (p *ConnPool) getBlock(ctx context.Context, poolCtx context.Context) (*Conn
 		case <-ctx.Done():
 			logEntry.Infoln("ctx.Done()")
 			return nil, ctx.Err()
+		// make sure to use idle item first.
 		default:
 			if p.active < p.config.MaxCap {
 				logEntry.Infoln("Get NewItem in")
-				item, ok := <-p.newItemCh
-				if !ok {
-					return nil, errors.New("Pool Closed")
+				select{
+				case <-waitTimer.C:
+					logEntry.Infoln("WaitTimeout")
+					return nil, errors.New("WaitTimeout")
+				case <-ctx.Done():
+					logEntry.Infoln("ctx.Done()")
+					return nil, ctx.Err()
+				case item, ok := <-p.newItemCh:
+					if !ok {
+						logEntry.Errorln("Pool Closed")
+						return nil, errors.New("Pool Closed")
+					}
+					if item == nil {
+						logEntry.Errorln("item is nil")
+						return nil, errors.New("create Item error")
+					}
+					return item.conn, nil
 				}
-				if item == nil {
-					return nil, errors.New("create Item error")
-				}
-				return item.conn, nil
 			}
 		}
 	}
@@ -212,6 +226,11 @@ func (p *ConnPool) Destroy(ctx context.Context, conn *Conn) error {
 }
 
 func (p *ConnPool) Close() {
+	logEntry := logrus.WithFields(logrus.Fields{
+		"func_name": "Close",
+	})
+	p.cancel()
+
 	p.mu.Lock()
 	if p.IdleItems != nil {
 		p.mu.Unlock()
@@ -222,7 +241,7 @@ func (p *ConnPool) Close() {
 		p.mu.Unlock()
 		close(p.newItemCh)
 	}
-	p.cancel()
+	logEntry.Infoln("Closed Pool")
 }
 
 func (p *ConnPool) removeItem(conn *Conn) {
