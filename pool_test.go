@@ -108,7 +108,7 @@ func Test_PoolGetNewTtem(t *testing.T) {
 	//fmt.Println("err:", err)
 
 	cancel()
-	// p.Close()
+	p.Close()
 }
 
 func Test_PoolPut(t *testing.T) {

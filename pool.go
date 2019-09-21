@@ -42,7 +42,7 @@ func (p *ConnPool) createItem(ctx context.Context) {
 	conn, err := p.factory.New(ctx)
 	if err != nil {
 		logEntry.Errorln(err)
-		p.newItemCh <- nil
+		// p.newItemCh <- nil
 		return
 	}
 	item := &item{
@@ -55,10 +55,16 @@ func (p *ConnPool) createItem(ctx context.Context) {
 }
 
 func (p *ConnPool) newItemLoop(ctx context.Context) {
+	logEntry := logrus.WithFields(logrus.Fields{
+		"func_name": "newItemLoop",
+	})
 	for {
 		select {
 		case <-ctx.Done():
+			logEntry.Debugln("Exit")
 			return
+		// May be blocked!
+		// when closed newItemCh, newItemCh can not write.
 		default:
 			if p.active < p.config.MaxCap {
 				p.createItem(ctx)
@@ -187,7 +193,7 @@ func (p *ConnPool) getBlock(ctx context.Context) (*Conn, error) {
 
 }
 
-// Recycle connection into the pool
+// Put Recycle connection into the pool
 // conn must be an object obtained in the pool
 // blocking access
 // PutWaitTimeout controls the timeout
@@ -225,12 +231,12 @@ func (p *ConnPool) Destroy(ctx context.Context, conn *Conn) error {
 	return nil
 }
 
+// Close close pool
 func (p *ConnPool) Close() {
 	logEntry := logrus.WithFields(logrus.Fields{
 		"func_name": "Close",
 	})
 	p.cancel()
-
 	p.mu.Lock()
 	if p.IdleItems != nil {
 		p.mu.Unlock()
@@ -239,7 +245,13 @@ func (p *ConnPool) Close() {
 	p.mu.Lock()
 	if p.newItemCh != nil {
 		p.mu.Unlock()
-		close(p.newItemCh)
+		// make sure p.newItemCh is empty
+		select{
+		case <-p.newItemCh:
+			close(p.newItemCh)
+		default:
+			close(p.newItemCh)
+		}
 	}
 	logEntry.Infoln("Closed Pool")
 }
