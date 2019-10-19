@@ -3,9 +3,10 @@ package pool
 import (
 	"context"
 	"errors"
-	"github.com/Sirupsen/logrus"
 	"sync/atomic"
 	"time"
+
+	"github.com/Sirupsen/logrus"
 )
 
 func init() {
@@ -34,7 +35,7 @@ func NewPool(ctx context.Context, config *Config, factory Factory) (*ConnPool, e
 	return p, nil
 }
 
-func (p *ConnPool) createItem(ctx context.Context) {
+func (p *ConnPool) createItem(ctx context.Context) *item {
 	logEntry := logrus.WithFields(logrus.Fields{
 		"func_name": "createItem",
 	})
@@ -43,32 +44,38 @@ func (p *ConnPool) createItem(ctx context.Context) {
 	if err != nil {
 		logEntry.Errorln(err)
 		// p.newItemCh <- nil
-		return
+		return nil
 	}
 	item := &item{
 		createdAt: now,
 		conn:      conn,
 	}
 	atomic.AddInt64(&p.active, 1)
-	p.newItemCh <- item
-	return
+	return item
 }
 
 func (p *ConnPool) newItemLoop(ctx context.Context) {
 	logEntry := logrus.WithFields(logrus.Fields{
 		"func_name": "newItemLoop",
 	})
+	// note close chan in right place
+	defer close(p.newItemCh)
 	for {
-		select {
-		case <-ctx.Done():
-			logEntry.Debugln("Exit")
-			return
-		// May be blocked!
-		// when closed newItemCh, newItemCh can not write.
-		default:
-			if p.active < p.config.MaxCap {
-				p.createItem(ctx)
+		if p.active < p.config.MaxCap {
+			item := p.createItem(ctx)
+			select {
+			case <-ctx.Done():
+				logEntry.Debugln("Exit")
+				return
+
+			case p.newItemCh <- item:
 			}
+			// // May be blocked!
+			// // when closed newItemCh, newItemCh can not write.
+			// default:
+			// 	if p.active < p.config.MaxCap {
+			// 		p.createItem(ctx)
+			// 	}
 		}
 	}
 }
@@ -165,30 +172,44 @@ func (p *ConnPool) getBlock(ctx context.Context) (*Conn, error) {
 		case <-ctx.Done():
 			logEntry.Infoln("ctx.Done()")
 			return nil, ctx.Err()
-		// make sure to use idle item first.
-		default:
-			if p.active < p.config.MaxCap {
-				logEntry.Infoln("Get NewItem in")
-				select{
-				case <-waitTimer.C:
-					logEntry.Infoln("WaitTimeout")
-					return nil, errors.New("WaitTimeout")
-				case <-ctx.Done():
-					logEntry.Infoln("ctx.Done()")
-					return nil, ctx.Err()
-				case item, ok := <-p.newItemCh:
-					if !ok {
-						logEntry.Errorln("Pool Closed")
-						return nil, errors.New("Pool Closed")
-					}
-					if item == nil {
-						logEntry.Errorln("item is nil")
-						return nil, errors.New("create Item error")
-					}
-					return item.conn, nil
-				}
+
+		case item, ok := <-p.newItemCh:
+			if !ok {
+				logEntry.Errorln("Pool Closed")
+				return nil, errors.New("Pool Closed")
 			}
+			if item == nil {
+				logEntry.Errorln("item is nil")
+				return nil, errors.New("create Item error")
+			}
+			return item.conn, nil
 		}
+
+		// error default
+		// // make sure to use idle item first.
+		// default:
+		// 	if p.active < p.config.MaxCap {
+		// 		logEntry.Infoln("Get NewItem in")
+		// 		select{
+		// 		case <-waitTimer.C:
+		// 			logEntry.Infoln("WaitTimeout")
+		// 			return nil, errors.New("WaitTimeout")
+		// 		case <-ctx.Done():
+		// 			logEntry.Infoln("ctx.Done()")
+		// 			return nil, ctx.Err()
+		// 		case item, ok := <-p.newItemCh:
+		// 			if !ok {
+		// 				logEntry.Errorln("Pool Closed")
+		// 				return nil, errors.New("Pool Closed")
+		// 			}
+		// 			if item == nil {
+		// 				logEntry.Errorln("item is nil")
+		// 				return nil, errors.New("create Item error")
+		// 			}
+		// 			return item.conn, nil
+		// 		}
+		// 	}
+		// }
 	}
 
 }
@@ -246,7 +267,7 @@ func (p *ConnPool) Close() {
 	if p.newItemCh != nil {
 		p.mu.Unlock()
 		// make sure p.newItemCh is empty
-		select{
+		select {
 		case <-p.newItemCh:
 			close(p.newItemCh)
 		default:
