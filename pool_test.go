@@ -4,22 +4,27 @@ import (
 	"context"
 	"fmt"
 	"github.com/stretchr/testify/assert"
+	"io"
 	"testing"
 	"time"
 )
 
-type ConnTest struct {
+type ConnFactory struct {
 	id int64
 }
 
-func (c *ConnTest) New(ctx context.Context) (*Conn, error) {
+type Conn struct {
+	id int64
+	//c net.Conn
+}
+
+func (c *ConnFactory) New(ctx context.Context) (io.Closer, error) {
 	//id := c.id + 1
 	return &Conn{}, nil
 }
 
-func (c *ConnTest) Close(conn *Conn) error {
-	fmt.Println("close conn,id:", conn.id)
-	return nil
+func (c *ConnFactory) Close(conn io.Closer) error {
+	return conn.Close()
 }
 
 func (c *Conn) Handle() {
@@ -28,6 +33,11 @@ func (c *Conn) Handle() {
 	//nums := 500 - rand.Intn(200)
 	nums := 400
 	time.Sleep(time.Duration(nums) * time.Millisecond)
+}
+
+func (c *Conn) Close()error{
+	fmt.Println("Close")
+	return nil
 }
 
 func GetConfig() *Config {
@@ -45,7 +55,7 @@ func GetConfig() *Config {
 func Test_PoolGetTimeOut(t *testing.T) {
 	poolCtx := context.Background()
 	config := GetConfig()
-	p, err := NewPool(poolCtx, config, &ConnTest{})
+	p, err := NewPool(poolCtx, config, &ConnFactory{})
 	assert.Nil(t, err)
 	assert.Equal(t, int64(len(p.IdleItems)), config.InitSize)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -80,7 +90,7 @@ func Test_PoolGetNewTtem(t *testing.T) {
 	poolCtx := context.Background()
 	config := GetConfig()
 	config.InitSize = config.InitSize - 5
-	p, err := NewPool(poolCtx, config, &ConnTest{})
+	p, err := NewPool(poolCtx, config, &ConnFactory{})
 	assert.Nil(t, err)
 	assert.Equal(t, int64(len(p.IdleItems)), config.InitSize)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -115,7 +125,7 @@ func Test_PoolPut(t *testing.T) {
 	config := GetConfig()
 	poolCtx := context.Background()
 
-	p, err := NewPool(poolCtx, config, &ConnTest{})
+	p, err := NewPool(poolCtx, config, &ConnFactory{})
 	assert.Nil(t, err)
 	assert.Equal(t, int64(len(p.IdleItems)), config.InitSize)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -150,7 +160,7 @@ func Benchmark_PoolParallel(b *testing.B) {
 	config := GetConfig2()
 	poolCtx := context.Background()
 
-	p, err := NewPool(poolCtx, config, &ConnTest{})
+	p, err := NewPool(poolCtx, config, &ConnFactory{})
 	assert.Nil(b, err)
 	assert.Equal(b, int64(len(p.IdleItems)), config.InitSize)
 	// ctx, cancel := context.WithCancel(context.Background())
@@ -163,7 +173,7 @@ func Benchmark_PoolParallel(b *testing.B) {
 				b.Error(err)
 				continue
 			}
-			conn.Handle()
+			conn.(*Conn).Handle()
 			err = p.Put(ctx, conn)
 			if err != nil {
 				b.Error(err)

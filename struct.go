@@ -2,6 +2,7 @@ package pool
 
 import (
 	"context"
+	"io"
 	"sync"
 	"time"
 )
@@ -19,20 +20,17 @@ const (
 )
 
 type Pool interface {
-	Get(ctx context.Context, blockGet bool) (*Conn, error)
-	Put(ctx context.Context, conn *Conn) error
-	Destroy(ctx context.Context, conn *Conn) error
+	Get(ctx context.Context, blockGet bool) (io.Closer, error)
+	Put(ctx context.Context, conn io.Closer) error
+	Destroy(ctx context.Context, conn io.Closer) error
 	Close()
 }
 
 type Factory interface {
-	New(ctx context.Context) (*Conn, error)
-	Close(*Conn) error
+	New(ctx context.Context) (io.Closer, error)
+	Close(io.Closer) error
 }
 
-type Conn struct {
-	id int64
-}
 
 type Config struct {
 	// pool Maximum capacity
@@ -71,5 +69,5 @@ type ConnPool struct {
 
 type item struct {
 	createdAt time.Time
-	conn      *Conn
+	conn      io.Closer
 }

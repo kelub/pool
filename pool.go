@@ -3,6 +3,7 @@ package pool
 import (
 	"context"
 	"errors"
+	"io"
 	"sync/atomic"
 	"time"
 
@@ -129,7 +130,7 @@ func (p *ConnPool) initPool(ctx context.Context) error {
 //}
 
 // Get  get a conn
-func (p *ConnPool) Get(ctx context.Context, blockGet bool) (*Conn, error) {
+func (p *ConnPool) Get(ctx context.Context, blockGet bool) (io.Closer, error) {
 	return p.getBlock(ctx)
 }
 
@@ -141,7 +142,7 @@ Timeout is controlled by WaitTimeout
 Priority is obtained from the idle channel IdleItems
 IdleItems has no object Create new item
 */
-func (p *ConnPool) getBlock(ctx context.Context) (*Conn, error) {
+func (p *ConnPool) getBlock(ctx context.Context) (io.Closer, error) {
 	logEntry := logrus.WithFields(logrus.Fields{
 		"func_name": "GetBlock",
 	})
@@ -219,7 +220,7 @@ func (p *ConnPool) getBlock(ctx context.Context) (*Conn, error) {
 // blocking access
 // PutWaitTimeout controls the timeout
 // return err the item will be removed
-func (p *ConnPool) Put(ctx context.Context, conn *Conn) error {
+func (p *ConnPool) Put(ctx context.Context, conn io.Closer) error {
 	logEntry := logrus.WithFields(logrus.Fields{
 		"func_name": "Put",
 	})
@@ -247,7 +248,7 @@ func (p *ConnPool) Put(ctx context.Context, conn *Conn) error {
 
 // Destroy Destroy a conn
 // conn must be an object obtained in the pool
-func (p *ConnPool) Destroy(ctx context.Context, conn *Conn) error {
+func (p *ConnPool) Destroy(ctx context.Context, conn io.Closer) error {
 	p.removeItem(conn)
 	return nil
 }
@@ -277,7 +278,7 @@ func (p *ConnPool) Close() {
 	logEntry.Infoln("Closed Pool")
 }
 
-func (p *ConnPool) removeItem(conn *Conn) {
+func (p *ConnPool) removeItem(conn io.Closer) {
 	atomic.AddInt64(&p.active, -1)
 	p.factory.Close(conn)
 }
